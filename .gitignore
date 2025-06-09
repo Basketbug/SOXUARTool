@@ -1,0 +1,55 @@
+# Ignore contents of input files
+input/*
+!input/.gitkeep
+
+# Ignore contents of output files  
+output/*
+!output/.gitkeep
+
+# Ignore contents of logs
+logs/*
+!logs/.gitkeep
+
+# Ignore any CSV/Excel files in root directory (if applicable)
+*.csv
+*.xlsx
+*.xls
+
+# Ignore environment files
+.env
+.env.local
+.env.*.local
+
+# Python specific
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE specific
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS specific
+.DS_Store
+Thumbs.db
+!/.venv/

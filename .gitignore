@@ -42,6 +42,8 @@ wheels/
 .installed.cfg
 *.egg
 
+!/.idea/
+
 # IDE specific
 .vscode/
 .idea/
@@ -53,3 +55,5 @@ wheels/
 .DS_Store
 Thumbs.db
 !/.venv/
+
+!/.archive/

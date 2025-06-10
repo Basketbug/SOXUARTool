@@ -143,6 +143,10 @@ def main():
 
     if not args.processor:
         parser.print_help()
+        for subparser in subparsers.choices.values():
+            print("============================")
+            print("Subparser:", subparser.prog)
+            subparser.print_help()
         sys.exit(1)
 
     setup_logging(args.log_level)

@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Tuple, Optional
 import logging
 
-from core.models import UserRecord, ProcessingStats, LookupMethod
+from core.models import UserRecord, ProcessingStats, LookupMethod, RoleRecord
 from core.ad_client import ActiveDirectoryClient
 from utils.csv_utils import CSVHandler
 
@@ -50,14 +50,18 @@ class BaseUserProcessor(ABC):
         return not has_meaningful_data
 
     def process_users(self, input_csv: str, output_csv: str,
-                      apply_filters: bool = True) -> ProcessingStats:
-        """Main processing workflow"""
+                      apply_filters: bool = True, role_output_csv: Optional[str] = None) -> ProcessingStats:
+        """Main processing workflow with optional role extraction"""
         self.logger.info(f"Starting {self.__class__.__name__} processing workflow")
 
         try:
             # Read CSV
             csv_data, headers = CSVHandler.read_csv(input_csv)
             self.logger.info(f"Read {len(csv_data)} records from {input_csv}")
+
+            # Store headers for processors that need them
+            if hasattr(self, 'headers'):
+                self.headers = headers
 
             # Apply filters if needed
             if apply_filters:
@@ -67,9 +71,20 @@ class BaseUserProcessor(ABC):
             # Process users
             processed_users = self.lookup_users(csv_data)
 
-            # Convert to output format and write
+            # Convert to output format and write main CSV
             output_data = [self.user_record_to_dict(user) for user in processed_users]
             CSVHandler.write_csv(output_data, output_csv, self.get_output_fieldnames())
+
+            # Generate role analysis if requested
+            if role_output_csv:
+                role_records = self.extract_roles_with_ad_data(csv_data, processed_users)
+                if role_records:
+                    role_output_data = [self.role_record_to_dict(role) for role in role_records]
+                    CSVHandler.write_csv(role_output_data, role_output_csv,
+                                         ['username', 'department', 'title', 'assigned_roles'])
+                    self.logger.info(f"Successfully wrote {len(role_records)} role records to {role_output_csv}")
+                else:
+                    self.logger.warning("No role data extracted - role output file not created")
 
             # Generate statistics
             stats = self.calculate_stats(processed_users)
@@ -162,6 +177,69 @@ class BaseUserProcessor(ABC):
         base_dict.update(user.csv_data)
         return base_dict
 
+    def extract_roles_with_ad_data(self, csv_data: List[Dict[str, Any]],
+                                   processed_users: List[UserRecord]) -> List[RoleRecord]:
+        """
+        Base implementation of role extraction - override in subclasses for specific logic.
+        Default behavior: create one record per user with 'No Roles' assignment.
+        """
+        # Create lookup dict for AD users
+        ad_user_dict = {user.username: user for user in processed_users
+                        if user.lookup_method in [LookupMethod.PRIMARY, LookupMethod.BACKUP,
+                                                  LookupMethod.DISPLAYNAME, LookupMethod.NAME_COMPONENTS,
+                                                  LookupMethod.EMAIL]}
+
+        role_records = []
+
+        for row in csv_data:
+            primary_id, backup_id = self.get_identifiers_for_lookup(row)
+            if not primary_id:
+                continue
+
+            # Determine which username to use and get AD data
+            username_to_use = primary_id
+            ad_user = ad_user_dict.get(primary_id)
+
+            if not ad_user and backup_id:
+                ad_user = ad_user_dict.get(backup_id)
+                if ad_user:
+                    username_to_use = backup_id
+
+            # Get department and title from AD or defaults
+            if ad_user:
+                department = ad_user.department or self._get_default_department()
+                title = ad_user.title or ad_user.full_name or username_to_use
+            else:
+                department = self._get_default_department()
+                title = username_to_use
+
+            # Default implementation - no role extraction
+            role_records.append(RoleRecord(
+                username=self.normalize_role_data(username_to_use),
+                department=self.normalize_role_data(department),
+                title=self.normalize_role_data(title),
+                assigned_roles='no roles'  # Normalized version
+            ))
+
+        return role_records
+
+    def _get_default_department(self) -> str:
+        """Get default department name for this processor"""
+        # Extract department name from class name (e.g., GreatPlainsProcessor -> Great Plains)
+        class_name = self.__class__.__name__.replace('Processor', '')
+        # Convert CamelCase to spaced words
+        import re
+        return re.sub(r'([A-Z])', r' \1', class_name).strip()
+
+    def role_record_to_dict(self, role: RoleRecord) -> Dict[str, Any]:
+        """Convert RoleRecord to dictionary for CSV output"""
+        return {
+            'username': role.username,
+            'department': role.department,
+            'title': role.title,
+            'assigned_roles': role.assigned_roles
+        }
+
     def calculate_stats(self, processed_users: List[UserRecord]) -> ProcessingStats:
         """Calculate processing statistics"""
         stats = ProcessingStats()
@@ -187,3 +265,33 @@ class BaseUserProcessor(ABC):
         method_counts = {method.value: count for method, count in stats.lookup_method_counts.items()}
         self.logger.info(f"Lookup summary: {method_counts}")
         self.logger.info(f"Success rate: {stats.success_rate:.1f}% ({stats.successful_lookups}/{stats.total_records})")
+
+    def normalize_role_data(self, value: str) -> str:
+        """
+        Normalize role data by converting to lowercase, removing whitespace, and cleaning quotes.
+
+        Args:
+            value: Raw value to normalize
+
+        Returns:
+            Normalized string value
+        """
+        if not value:
+            return ''
+
+        # Convert to string and strip whitespace
+        normalized = str(value).strip()
+
+        # Remove trailing quotes/apostrophes
+        normalized = normalized.rstrip("'\"")
+
+        # Remove leading quotes/apostrophes
+        normalized = normalized.lstrip("'\"")
+
+        # Convert to lowercase
+        normalized = normalized.lower()
+
+        # Remove extra internal whitespace (multiple spaces become single space)
+        normalized = ' '.join(normalized.split())
+
+        return normalized

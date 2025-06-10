@@ -5,7 +5,7 @@
 from typing import List, Dict, Any, Tuple, Optional
 
 from core.base_processor import BaseUserProcessor
-from core.models import UserRecord, LookupMethod
+from core.models import UserRecord, LookupMethod, RoleRecord
 
 
 class GreatPlainsProcessor(BaseUserProcessor):
@@ -96,3 +96,83 @@ class GreatPlainsProcessor(BaseUserProcessor):
             'lookup_method', 'original_identifier', 'csv_title', 'csv_department',
             'security_role_id'
         ]
+
+    def extract_roles_with_ad_data(self, csv_data: List[Dict[str, Any]],
+                                   processed_users: List[UserRecord]) -> List[RoleRecord]:
+        """Extract roles from Great Plains data based on security role ID"""
+        # Create lookup dict for AD users
+        ad_user_dict = {user.username: user for user in processed_users
+                        if user.lookup_method in [LookupMethod.DISPLAYNAME, LookupMethod.NAME_COMPONENTS]}
+
+        role_records = []
+
+        for row in csv_data:
+            primary_id, _ = self.get_identifiers_for_lookup(row)
+            if not primary_id:
+                continue
+
+            # Get AD user data
+            ad_user = ad_user_dict.get(primary_id)
+
+            # Get department and title from AD or CSV fallback
+            if ad_user:
+                department = ad_user.department or row.get(self.DEPARTMENT_COLUMN, '') or "Great Plains"
+                title = ad_user.title or row.get(self.TITLE_COLUMN, '') or ad_user.full_name or primary_id
+                username_to_use = ad_user.username
+            else:
+                department = row.get(self.DEPARTMENT_COLUMN, '') or "Great Plains"
+                title = row.get(self.TITLE_COLUMN, '') or primary_id
+                username_to_use = primary_id
+
+            # Extract role from security role ID
+            security_role_id = row.get(self.SECURITYROLEID_COLUMN, '').strip()
+
+            if security_role_id:
+                # Clean up role name and normalize
+                role_name = self.clean_security_role_name(security_role_id)
+                role_name = self.normalize_role_data(role_name)  # Add normalization
+
+                role_records.append(RoleRecord(
+                    username=self.normalize_role_data(username_to_use),
+                    department=self.normalize_role_data(department),
+                    title=self.normalize_role_data(title),
+                    assigned_roles=role_name
+                ))
+            else:
+                # No role assigned
+                role_records.append(RoleRecord(
+                    username=self.normalize_role_data(username_to_use),
+                    department=self.normalize_role_data(department),
+                    title=self.normalize_role_data(title),
+                    assigned_roles='no roles'
+                ))
+
+        return role_records
+
+    def clean_security_role_name(self, role_id: str) -> str:
+        """Clean up security role ID for better readability"""
+        if not role_id:
+            return 'No Roles'
+
+        # Remove common prefixes/suffixes and clean up
+        cleaned = role_id.replace('_', ' ').replace('-', ' ').strip()
+
+        # Convert to title case and fix common abbreviations
+        words = cleaned.split()
+        title_words = []
+
+        for word in words:
+            if word.upper() in ['ID', 'GP', 'ERP', 'HR', 'IT', 'AP', 'AR', 'GL', 'FA']:
+                title_words.append(word.upper())
+            elif word.lower() in ['admin', 'administrator']:
+                title_words.append('Admin')
+            elif word.lower() in ['mgr', 'manager']:
+                title_words.append('Manager')
+            elif word.lower() == 'analyst':
+                title_words.append('Analyst')
+            elif word.lower() == 'user':
+                title_words.append('User')
+            else:
+                title_words.append(word.title())
+
+        return ' '.join(title_words)

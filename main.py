@@ -1,7 +1,6 @@
 # =============================================================================
 # main.py - CLI entry point
 # =============================================================================
-
 import argparse
 import logging
 import sys
@@ -70,7 +69,6 @@ def handle_csv_processors(args, config):
             config.ad_server, config.ad_username,
             config.ad_password, config.base_dn
     ) as ad_client:
-
         # Select processor based on type
         processor_map = {
             'great_plains': GreatPlainsProcessor,
@@ -80,23 +78,15 @@ def handle_csv_processors(args, config):
         }
 
         processor_class = processor_map[args.processor]
+        processor = processor_class(ad_client)
 
-        # Handle special case for defi_los with role extraction
-        if args.processor == 'defi_los' and hasattr(args, 'role_output') and args.role_output:
-            processor = processor_class(ad_client, extract_roles=True)
-            stats = processor.process_users(
-                args.input_csv,
-                args.output_csv,
-                apply_filters=not args.no_filters,
-                role_output_csv=args.role_output
-            )
-        else:
-            processor = processor_class(ad_client)
-            stats = processor.process_users(
-                args.input_csv,
-                args.output_csv,
-                apply_filters=not args.no_filters
-            )
+        # Process users with optional role output
+        stats = processor.process_users(
+            args.input_csv,
+            args.output_csv,
+            apply_filters=not args.no_filters,
+            role_output_csv=getattr(args, 'role_output', None)
+        )
 
         logger.info("Processing completed successfully!")
         logger.info(f"Final success rate: {stats.success_rate:.1f}%")
@@ -137,10 +127,7 @@ def main():
         proc_parser.add_argument('input_csv', help='Input CSV file path')
         proc_parser.add_argument('output_csv', help='Output CSV file path')
         proc_parser.add_argument('--no-filters', action='store_true', help='Disable filtering')
-
-        # Special case for defi_los role extraction
-        if proc_name == 'defi_los':
-            proc_parser.add_argument('--role-output', help='Output CSV file for role analysis')
+        proc_parser.add_argument('--role-output', help='Output CSV file for role analysis (optional)')
 
     # Datascan processor (Excel-based)
     datascan_parser = subparsers.add_parser('datascan', help='Datascan Excel processor')

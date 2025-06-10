@@ -3,7 +3,7 @@
 # =============================================================================
 
 from dataclasses import dataclass, field
-from typing import Dict, Any
+from typing import Dict, Any, Optional, List
 from enum import Enum
 
 

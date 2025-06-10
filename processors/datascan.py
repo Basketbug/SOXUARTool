@@ -2,12 +2,13 @@
 # processors/datascan.py - Datascan Excel processor
 # =============================================================================
 
-import logging
-from typing import Dict, Optional
-
 import pandas as pd
+from typing import List, Dict, Any, Tuple, Optional
+import logging
 
+from core.models import UserRecord, LookupMethod
 from core.ad_client import ActiveDirectoryClient
+from utils.csv_utils import CSVHandler
 
 
 class DatascanProcessor:

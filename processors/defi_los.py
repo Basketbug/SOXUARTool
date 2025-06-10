@@ -220,18 +220,21 @@ class DefiLOSProcessor(BaseUserProcessor):
             # Create role records
             if assigned_roles:
                 for role in assigned_roles:
+                    clean_role = self.clean_role_name(role)
+                    normalized_role = self.normalize_role_data(clean_role)  # Add normalization
+
                     role_records.append(RoleRecord(
-                        username=username_to_use,
-                        department=department,
-                        title=title,
-                        assigned_roles=role
+                        username=self.normalize_role_data(username_to_use),
+                        department=self.normalize_role_data(department),
+                        title=self.normalize_role_data(title),
+                        assigned_roles=normalized_role
                     ))
             else:
                 role_records.append(RoleRecord(
-                    username=username_to_use,
-                    department=department,
-                    title=title,
-                    assigned_roles='No Roles'
+                    username=self.normalize_role_data(username_to_use),
+                    department=self.normalize_role_data(department),
+                    title=self.normalize_role_data(title),
+                    assigned_roles='no roles'
                 ))
 
         return role_records

@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block title %}Processing Results - SOXUARTool{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12">
+        <h1 class="mb-4">
+            <i class="fas fa-check-circle text-success me-2"></i>
+            Processing Complete
+        </h1>
+        <p class="lead">Your file has been processed using <strong>{{ processor_name }}</strong></p>
+    </div>
+</div>
+
+{% if stats %}
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card stats-card">
+            <div class="card-body">
+                <h4 class="card-title">
+                    <i class="fas fa-chart-bar me-2"></i>
+                    Processing Statistics
+                </h4>
+                <div class="row">
+                    <div class="col-md-3">
+                        <h3>{{ stats.total_records }}</h3>
+                        <p class="mb-0">Total Records</p>
+                    </div>
+                    {% if 'successful_lookups' in stats %}
+                    <div class="col-md-3">
+                        <h3>{{ stats.successful_lookups }}</h3>
+                        <p class="mb-0">Successful Lookups</p>
+                    </div>
+                    <div class="col-md-3">
+                        <h3>{{ stats.failed_lookups }}</h3>
+                        <p class="mb-0">Failed Lookups</p>
+                    </div>
+                    {% endif %}
+                    <div class="col-md-3">
+                        <h3>{{ "%.1f"|format(stats.success_rate) }}%</h3>
+                        <p class="mb-0">Success Rate</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<div class="row mb-4">
+    <div class="col-md-12">
+        <h3>Download Results</h3>
+        <p class="text-muted">Click on any file below to download your processed results:</p>
+    </div>
+</div>
+
+<div class="row mb-4">
+    {% for file in output_files %}
+    <div class="col-md-6 mb-3">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">
+                    <i class="fas fa-download me-2"></i>
+                    {{ file.filename }}
+                </h5>
+                <p class="card-text">{{ file.description }}</p>
+                <a href="{{ url_for('download_file', filename=file.filename) }}" class="btn btn-primary">
+                    <i class="fas fa-download me-2"></i>
+                    Download
+                </a>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="row">
+    <div class="col-md-12">
+        <a href="{{ url_for('index') }}" class="btn btn-secondary">
+            <i class="fas fa-arrow-left me-2"></i>
+            Process Another File
+        </a>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,286 @@
+{% extends "base.html" %}
+
+{% block title %}Upload File - SOXUARTool{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12">
+        <h1 class="mb-4">
+            <i class="fas fa-upload me-2"></i>
+            User Access Review Processor
+        </h1>
+        <p class="lead">Upload your user data file and select the appropriate processor for compliance analysis.</p>
+    </div>
+</div>
+
+<form id="uploadForm" method="POST" action="{{ url_for('upload_file') }}" enctype="multipart/form-data">
+    <!-- Processor Selection -->
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <h3>1. Select Application Processor</h3>
+            <p class="text-muted">Choose the processor that matches your data source:</p>
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        {% for key, processor in processors.items() %}
+        <div class="col-md-6 col-lg-4 mb-3">
+            <div class="card processor-card h-100" onclick="selectProcessor('{{ key }}')">
+                <div class="card-body">
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="processor" id="processor_{{ key }}" value="{{ key }}">
+                        <label class="form-check-label" for="processor_{{ key }}">
+                            <h5 class="card-title">{{ processor.name }}</h5>
+                        </label>
+                    </div>
+                    <p class="card-text">{{ processor.description }}</p>
+                    <small class="text-muted">
+                        <i class="fas fa-file me-1"></i>
+                        Supports: {{ processor.file_types | join(', ') | upper }}
+                    </small>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- File Upload -->
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <h3>2. Upload Data File</h3>
+            <div class="file-upload-area" id="fileUploadArea">
+                <i class="fas fa-cloud-upload-alt fa-3x mb-3 text-muted"></i>
+                <h4>Drag & drop your file here</h4>
+                <p class="text-muted">or click to browse</p>
+                <input type="file" name="file" id="fileInput" class="form-control" style="display: none;" accept=".csv,.xlsx,.xls">
+            </div>
+            <div id="fileInfo" class="mt-3" style="display: none;">
+                <div class="alert alert-info">
+                    <i class="fas fa-file me-2"></i>
+                    <span id="fileName"></span>
+                    <span id="fileSize" class="text-muted"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Processing Options -->
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <h3>3. Processing Options</h3>
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-body">
+                    <h5>Filtering Options</h5>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="no_filters" name="no_filters">
+                        <label class="form-check-label" for="no_filters">
+                            <strong>Disable Filtering</strong>
+                            <br><small class="text-muted">Process all records regardless of status (includes disabled/inactive accounts)</small>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-body">
+                    <h5>Role Analysis</h5>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="role_extraction" name="role_extraction">
+                        <label class="form-check-label" for="role_extraction">
+                            <strong>Generate Role Analysis</strong>
+                            <br><small class="text-muted">Create additional output file with role assignments for analysis</small>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Datascan Specific Options -->
+    <div class="row mb-4" id="datascanOptions" style="display: none;">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-body">
+                    <h5>Excel Sheet Options</h5>
+                    <label for="sheet_name" class="form-label">Sheet Name (optional)</label>
+                    <input type="text" class="form-control" id="sheet_name" name="sheet_name" placeholder="Leave blank to use first sheet">
+                    <small class="form-text text-muted">Specify Excel sheet name if file has multiple sheets</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Submit -->
+    <div class="row">
+        <div class="col-md-12">
+            <button type="submit" class="btn btn-primary btn-lg" id="submitBtn" disabled>
+                <i class="fas fa-play me-2"></i>
+                Process File
+            </button>
+            <div class="processing-spinner ms-3" id="processingSpinner">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Processing...</span>
+                </div>
+                <span class="ms-2">Processing your file...</span>
+            </div>
+        </div>
+    </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let selectedProcessor = null;
+let selectedFile = null;
+
+function selectProcessor(processorKey) {
+    // Clear previous selection
+    document.querySelectorAll('.processor-card').forEach(card => {
+        card.classList.remove('selected');
+    });
+
+    // Select new processor
+    document.getElementById(`processor_${processorKey}`).checked = true;
+    document.querySelector(`#processor_${processorKey}`).closest('.processor-card').classList.add('selected');
+    selectedProcessor = processorKey;
+
+    // Show/hide datascan options
+    const datascanOptions = document.getElementById('datascanOptions');
+    if (processorKey === 'datascan') {
+        datascanOptions.style.display = 'block';
+    } else {
+        datascanOptions.style.display = 'none';
+    }
+
+    updateSubmitButton();
+}
+
+function updateSubmitButton() {
+    const submitBtn = document.getElementById('submitBtn');
+    if (selectedProcessor && selectedFile) {
+        submitBtn.disabled = false;
+    } else {
+        submitBtn.disabled = true;
+    }
+}
+
+// File upload handling
+const fileUploadArea = document.getElementById('fileUploadArea');
+const fileInput = document.getElementById('fileInput');
+const fileInfo = document.getElementById('fileInfo');
+const fileName = document.getElementById('fileName');
+const fileSize = document.getElementById('fileSize');
+
+// Only attach click event to the browse button, not the entire upload area
+fileUploadArea.addEventListener('click', (e) => {
+    // Only trigger file dialog if clicking the upload area itself, not the browse button
+    if (e.target === fileUploadArea || e.target.closest('.btn') === null) {
+        fileInput.click();
+    }
+});
+
+fileUploadArea.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    fileUploadArea.classList.add('dragover');
+});
+
+fileUploadArea.addEventListener('dragleave', () => {
+    fileUploadArea.classList.remove('dragover');
+});
+
+fileUploadArea.addEventListener('drop', (e) => {
+    e.preventDefault();
+    fileUploadArea.classList.remove('dragover');
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+        handleFileSelect(files[0]);
+        // Update the file input with the dropped file
+        const dt = new DataTransfer();
+        dt.items.add(files[0]);
+        fileInput.files = dt.files;
+    }
+});
+
+fileInput.addEventListener('change', (e) => {
+    if (e.target.files.length > 0) {
+        handleFileSelect(e.target.files[0]);
+    }
+});
+
+function handleFileSelect(file) {
+    selectedFile = file;
+    fileName.textContent = file.name;
+    fileSize.textContent = ` (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
+    fileInfo.style.display = 'block';
+    updateSubmitButton();
+}
+
+// Form submission with manual file handling
+document.getElementById('uploadForm').addEventListener('submit', (e) => {
+    // If we have a selectedFile from drag & drop, we need to handle it specially
+    if (selectedFile && fileInput.files.length === 0) {
+        e.preventDefault();
+
+        // Create FormData and append the file manually
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+        formData.append('processor', selectedProcessor);
+
+        if (document.getElementById('no_filters').checked) {
+            formData.append('no_filters', 'on');
+        }
+        if (document.getElementById('role_extraction').checked) {
+            formData.append('role_extraction', 'on');
+        }
+
+        const sheetName = document.getElementById('sheet_name').value;
+        if (sheetName) {
+            formData.append('sheet_name', sheetName);
+        }
+
+        // Show processing state
+        const submitBtn = document.getElementById('submitBtn');
+        const spinner = document.getElementById('processingSpinner');
+        submitBtn.style.display = 'none';
+        spinner.style.display = 'inline-flex';
+
+        // Submit via fetch
+        fetch('/upload', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => {
+            if (response.redirected) {
+                window.location.href = response.url;
+            } else {
+                return response.text().then(text => {
+                    document.open();
+                    document.write(text);
+                    document.close();
+                });
+            }
+        })
+        .catch(error => {
+            console.error('Upload error:', error);
+            alert('Upload failed. Please try again.');
+            submitBtn.style.display = 'inline-block';
+            spinner.style.display = 'none';
+        });
+    } else {
+        // Normal form submission
+        const submitBtn = document.getElementById('submitBtn');
+        const spinner = document.getElementById('processingSpinner');
+
+        submitBtn.style.display = 'none';
+        spinner.style.display = 'inline-flex';
+    }
+});
+</script>
+{% endblock %}

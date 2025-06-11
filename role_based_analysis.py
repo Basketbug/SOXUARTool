@@ -5,6 +5,13 @@ Automatically identifies standard vs. ad-hoc role assignments based on departmen
 
 Usage:
     python access_review.py input.csv [--threshold 70] [--output report.txt] [--csv-export recommendations.csv]
+
+6/11/2025 Bug Fix - Access Review Analyzer
+Key fixes:
+1. Count unique users per department/title combination (not role assignments)
+2. Fixed percentage calculation to use unique user count
+3. Improved role parsing to handle multiple roles per user properly
+4. Added debug logging to verify counts
 """
 
 import csv
@@ -113,8 +120,8 @@ class AccessReviewAnalyzer:
 
                     return False
 
-                # Read data
-                self.data = []
+                # Read raw data first
+                raw_data = []
                 if manual_headers:
                     # Handle manually split headers - need to split data rows too
                     print("Debug - Processing data rows with manual splitting...")
@@ -133,8 +140,6 @@ class AccessReviewAnalyzer:
                             # Fallback to simple split if csv.reader fails
                             row = line.split(delimiter)
 
-                        print(f"Debug - Row {row_num}: {len(row)} columns, data: {row[:4] if len(row) >= 4 else row}")
-
                         if len(row) >= len(fieldnames):
                             cleaned_row = {}
                             for i, field_name in enumerate(fieldnames):
@@ -143,9 +148,7 @@ class AccessReviewAnalyzer:
 
                             # Validate required fields
                             if all(cleaned_row.get(col) for col in required_columns):
-                                self.data.append(cleaned_row)
-                                if len(self.data) <= 3:  # Show first few successful rows
-                                    print(f"Debug - Successfully added row: {cleaned_row}")
+                                raw_data.append(cleaned_row)
                             else:
                                 missing_fields = [col for col in required_columns if not cleaned_row.get(col)]
                                 print(
@@ -153,9 +156,6 @@ class AccessReviewAnalyzer:
                         else:
                             print(
                                 f"Warning: Skipping row {row_num} - insufficient columns (got {len(row)}, need {len(fieldnames)})")
-                            if row_num <= 5:  # Show details for first few failed rows
-                                print(f"  Raw line: '{line[:100]}...' ")
-                                print(f"  Split result: {row}")
                 else:
                     # Standard DictReader processing
                     for row_num, row in enumerate(reader, start=2):
@@ -167,10 +167,51 @@ class AccessReviewAnalyzer:
 
                         # Validate required fields
                         if all(cleaned_row.get(col) for col in required_columns):
-                            self.data.append(cleaned_row)
+                            raw_data.append(cleaned_row)
                         else:
                             missing_fields = [col for col in required_columns if not cleaned_row.get(col)]
                             print(f"Warning: Skipping row {row_num} - missing data for: {', '.join(missing_fields)}")
+
+                # CRITICAL FIX: Aggregate roles per user
+                print(f"Debug - Raw data loaded: {len(raw_data)} records")
+
+                # Group by user key (username + department + title)
+                user_roles = defaultdict(set)
+                user_info = {}
+
+                for row in raw_data:
+                    user_key = f"{row['username']}|{row['department']}|{row['title']}"
+
+                    # Store user info (same for all rows of this user)
+                    if user_key not in user_info:
+                        user_info[user_key] = {
+                            'username': row['username'],
+                            'department': row['department'],
+                            'title': row['title']
+                        }
+
+                    # Add role to user's set of roles
+                    role = row['assigned_roles'].strip()
+                    if role:
+                        user_roles[user_key].add(role)
+                    else:
+                        # Handle users with no roles
+                        user_roles[user_key].add('no roles')
+
+                # Convert back to the expected format (one row per user with comma-separated roles)
+                self.data = []
+                for user_key, roles in user_roles.items():
+                    user_record = user_info[user_key].copy()
+                    user_record['assigned_roles'] = ', '.join(sorted(roles))
+                    self.data.append(user_record)
+
+                print(f"Debug - After aggregation: {len(self.data)} unique users")
+
+                # Show example of aggregated data
+                if self.data:
+                    sample_user = self.data[0]
+                    print(
+                        f"Debug - Sample aggregated user: {sample_user['username']} has roles: {sample_user['assigned_roles']}")
 
                 if not self.data:
                     print("Error: No valid data found in CSV file")
@@ -192,7 +233,8 @@ class AccessReviewAnalyzer:
 
     def analyze_access(self) -> List[Dict]:
         """
-        Analyze user access patterns and identify standard vs. ad-hoc roles.
+        FIXED: Analyze user access patterns and identify standard vs. ad-hoc roles.
+        Key fix: Count unique users per department/title, not role assignments.
 
         Returns:
             List of analysis results for each department/title group
@@ -201,36 +243,43 @@ class AccessReviewAnalyzer:
             print("Error: No data loaded. Please load a CSV file first.")
             return []
 
-        # Group users by department and title
+        # Group users by department and title - KEY FIX: Track unique users and role frequency
         groups = defaultdict(lambda: {
-            'users': [],
+            'unique_users': set(),  # FIX: Track unique users
+            'user_roles': defaultdict(set),  # Track which roles each user has
             'role_frequency': defaultdict(int)
         })
 
         for user in self.data:
             group_key = f"{user['department']}|{user['title']}"
-            groups[group_key]['users'].append(user)
+            username = user['username']
+
+            # FIX: Add user to unique set
+            groups[group_key]['unique_users'].add(username)
 
             # Parse roles (handle comma-separated values)
             roles_str = user['assigned_roles']
             roles = [role.strip() for role in roles_str.split(',') if role.strip()]
 
             for role in roles:
-                groups[group_key]['role_frequency'][role] += 1
+                # FIX: Only count each user once per role
+                if role not in groups[group_key]['user_roles'][username]:
+                    groups[group_key]['user_roles'][username].add(role)
+                    groups[group_key]['role_frequency'][role] += 1
 
         # Analyze each group
         self.analysis = []
 
         for group_key, group_data in groups.items():
             department, title = group_key.split('|', 1)
-            total_users = len(group_data['users'])
+            total_users = len(group_data['unique_users'])  # FIX: Use unique user count
 
             role_analysis = []
             standard_roles = []
             adhoc_roles = []
 
             for role, count in group_data['role_frequency'].items():
-                percentage = (count / total_users) * 100
+                percentage = (count / total_users) * 100  # FIX: Use unique user count
                 is_standard = percentage >= self.threshold
 
                 role_info = {
@@ -252,6 +301,15 @@ class AccessReviewAnalyzer:
             standard_roles.sort(key=lambda x: x['percentage'], reverse=True)
             adhoc_roles.sort(key=lambda x: x['percentage'], reverse=True)
 
+            # FIX: Convert users list properly
+            users_list = []
+            for username in group_data['unique_users']:
+                # Find the original user record to get all info
+                user_record = next((u for u in self.data if u['username'] == username and
+                                    u['department'] == department and u['title'] == title), None)
+                if user_record:
+                    users_list.append(user_record)
+
             group_analysis = {
                 'department': department,
                 'title': title,
@@ -260,7 +318,7 @@ class AccessReviewAnalyzer:
                 'standard_roles': standard_roles,
                 'adhoc_roles': adhoc_roles,
                 'has_adhoc_assignments': len(adhoc_roles) > 0,
-                'users': group_data['users']
+                'users': users_list
             }
 
             self.analysis.append(group_analysis)
@@ -440,6 +498,14 @@ class AccessReviewAnalyzer:
                         users_with_role = set()
                         for user in group['users']:
                             user_roles = [r.strip() for r in user['assigned_roles'].split(',') if r.strip()]
+
+                            # DEBUG: Print role comparison for troubleshooting
+                            if 'jodi' in user['username'].lower():
+                                print(f"    DEBUG - Checking if Jodi has role '{role}':")
+                                print(f"      Jodi's roles: {user_roles}")
+                                print(f"      Looking for: '{role}'")
+                                print(f"      Match found: {role in user_roles}")
+
                             if role in user_roles:
                                 users_with_role.add(user['username'])
 
@@ -447,22 +513,24 @@ class AccessReviewAnalyzer:
 
                         print(f"  Standard role '{role}': {len(users_without_role)} users need access")
 
-                        for user in users_without_role:
-                            writer.writerow({
-                                'action_type': 'GRANT_ACCESS',
-                                'priority': 'HIGH',
-                                'department': dept,
-                                'title': title,
-                                'role': role,
-                                'username': user['username'],
-                                'current_status': 'MISSING_STANDARD_ROLE',
-                                'recommended_action': f'Grant {role} access',
-                                'business_justification_required': 'NO',
-                                'percentage_compliance': f"{role_info['percentage']:.1f}%",
-                                'affected_users': f"{len(users_without_role)} of {total_users}",
-                                'implementation_notes': f'Standard role for {title}s in {dept} - {role_info["count"]}/{total_users} currently have this role'
-                            })
-                            total_actions += 1
+                        # Only create GRANT actions if there are actually users missing the role
+                        if len(users_without_role) > 0:
+                            for user in users_without_role:
+                                writer.writerow({
+                                    'action_type': 'GRANT_ACCESS',
+                                    'priority': 'HIGH',
+                                    'department': dept,
+                                    'title': title,
+                                    'role': role,
+                                    'username': user['username'],
+                                    'current_status': 'MISSING_STANDARD_ROLE',
+                                    'recommended_action': f'Grant {role} access',
+                                    'business_justification_required': 'NO',
+                                    'percentage_compliance': f"{role_info['percentage']:.1f}%",
+                                    'affected_users': f"{len(users_without_role)} of {total_users}",
+                                    'implementation_notes': f'Standard role for {title}s in {dept} - {role_info["count"]}/{total_users} currently have this role'
+                                })
+                                total_actions += 1
 
                     # Create actions for ad-hoc roles (REVIEW/REMOVE access)
                     for role_info in group['adhoc_roles']:
